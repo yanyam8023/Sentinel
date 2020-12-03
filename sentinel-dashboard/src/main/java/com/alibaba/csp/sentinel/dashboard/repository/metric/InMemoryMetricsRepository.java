@@ -18,13 +18,12 @@ package com.alibaba.csp.sentinel.dashboard.repository.metric;
 import com.alibaba.csp.sentinel.dashboard.datasource.entity.MetricEntity;
 import com.alibaba.csp.sentinel.util.StringUtil;
 import com.alibaba.csp.sentinel.util.TimeUtil;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -38,6 +37,8 @@ import java.util.stream.Collectors;
  */
 @Component
 public class InMemoryMetricsRepository implements MetricsRepository<MetricEntity> {
+    @Autowired
+    private PrometheusMeterRegistry prometheusMeterRegistry;
 
     private static final long MAX_METRIC_LIVE_TIME_MS = 1000 * 60 * 5;
 
@@ -64,6 +65,7 @@ public class InMemoryMetricsRepository implements MetricsRepository<MetricEntity
                             return eldest.getKey() < TimeUtil.currentTimeMillis() - MAX_METRIC_LIVE_TIME_MS;
                         }
                     }).put(entity.getTimestamp().getTime(), entity);
+            doRegisterMetrics();
         } finally {
             readWriteLock.writeLock().unlock();
         }
@@ -162,5 +164,30 @@ public class InMemoryMetricsRepository implements MetricsRepository<MetricEntity
         } finally {
             readWriteLock.readLock().unlock();
         }
+    }
+
+    /**
+     * 解析
+     */
+    private void doRegisterMetrics() {
+        for (Map.Entry<String, Map<String, LinkedHashMap<Long, MetricEntity>>> metrics: allMetrics.entrySet()) {
+            for (Map.Entry<String, LinkedHashMap<Long, MetricEntity>> m: metrics.getValue().entrySet()) {
+                LinkedHashMap<Long, MetricEntity> value = m.getValue();
+                for (Map.Entry<Long, MetricEntity> entry: value.entrySet()) {
+                    registerMetrics(entry.getValue());
+                }
+            }
+        }
+    }
+
+    /**
+     * 注册
+     * @param metricEntity
+     */
+    private void registerMetrics(MetricEntity metricEntity) {
+        Gauge.builder("sentinel.name.demo1", metricEntity, value -> metricEntity.getSuccessQps())
+                .tags(Collections.emptyList())
+                .description("")
+                .register(prometheusMeterRegistry);
     }
 }
